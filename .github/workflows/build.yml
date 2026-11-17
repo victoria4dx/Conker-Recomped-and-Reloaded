@@ -22,10 +22,10 @@ on:
         default: false
 
 env:
-  # this fork's kit, with the fog and depth of field settings: packaged on Windows (tools\package.bat), so it has
+  # this fork's kit, with the fog, depth of field and HDR settings: packaged on Windows (tools\package.bat), so it has
   # setup-windows.exe alone and the Linux jobs run only when asked
   KIT_REPO: victoria4dx/live-and-recompiled
-  KIT_TAG: kit-fog-dof
+  KIT_TAG: kit-hdr
   QT_VERSION: '6.8.3'
 
 jobs:

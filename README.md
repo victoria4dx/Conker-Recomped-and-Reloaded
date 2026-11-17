@@ -55,6 +55,8 @@ on your PC, with a modern Vulkan renderer. There's no emulator.
   aberration.
 - The game's vignette (its darkened screen edges) can be turned off. The red flash when you're hurt stays.
 - The game's distance fog and its depth of field blur can each be turned off (Graphics → Post-processing).
+- **HDR output** (off by default) on an HDR display: HDR10 or scRGB, with paper white, peak brightness and highlight
+  strength settings. The game's picture is still its own 8-bit one, shown brighter where it is brightest.
 
 **Language and sound**
 - Play in **English, French, German, Spanish, Italian or Japanese**: menus and subtitles from the disc. The voices are

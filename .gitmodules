@@ -1,4 +1,4 @@
 [submodule "live-and-recompiled"]
 	path = live-and-recompiled
 	url = https://github.com/victoria4dx/live-and-recompiled.git
-	branch = fog-dof-toggles
+	branch = hdr-output

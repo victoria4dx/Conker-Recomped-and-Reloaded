@@ -405,6 +405,21 @@ QWidget* MainWindow::BuildGraphics() {
     connect(ao, &QSpinBox::valueChanged, this, aoReach);
     aoReach(0);
 
+    v->addWidget(Group(tr("HDR"), &f));
+    QCheckBox* hdr = Check(f, tr("HDR output"), "hdr", false,
+                           tr("For an HDR display, with HDR turned on in the system's settings. Without one the game "
+                              "is shown as usual."));
+    QSpinBox* paper = Percent(f, tr("Paper white"), "hdr_paper_white", 80, 500, 200, tr(" nits"));
+    QSpinBox* peak = Percent(f, tr("Peak brightness"), "hdr_peak", 400, 4000, 1000, tr(" nits"));
+    QSpinBox* highlights = Percent(f, tr("Highlights"), "hdr_highlights", 0, 100, 50, tr(" %"));
+    Hint(f, tr("Paper white is how bright the game's white is. Highlights is how far the brightest parts rise above "
+               "it towards the peak, your display's brightest: 0 shows the picture as it is in SDR."));
+    auto hdrRows = [=](bool on) {
+        for (QSpinBox* s : {paper, peak, highlights}) s->parentWidget()->setEnabled(on);
+    };
+    connect(hdr, &QCheckBox::toggled, this, hdrRows);
+    hdrRows(false);
+
     v->addWidget(Group(tr("Overlay and startup"), &f));
     Check(f, tr("FPS counter in the corner"), "fps_overlay", false);
     Check(f, tr("FPS in the window title"), "fps_in_title", true);
