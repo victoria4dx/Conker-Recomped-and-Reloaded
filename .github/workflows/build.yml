@@ -16,15 +16,22 @@ on:
         description: 'Release tag to attach the builds to (empty: build and test only)'
         required: false
         default: ''
+      linux:
+        description: 'Also build the Linux AppImage (the kit release must have setup-linux)'
+        type: boolean
+        default: false
 
 env:
-  KIT_REPO: Mabec-games/live-and-recompiled
-  KIT_TAG: kit-1.5.4
+  # this fork's kit, with the fog and depth of field settings: packaged on Windows (tools\package.bat), so it has
+  # setup-windows.exe alone and the Linux jobs run only when asked
+  KIT_REPO: victoria4dx/live-and-recompiled
+  KIT_TAG: kit-fog-dof
   QT_VERSION: '6.8.3'
 
 jobs:
   linux:
     name: Linux AppImage
+    if: inputs.linux
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -143,9 +150,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release download $env:KIT_TAG -R $env:KIT_REPO -D kit -p setup-windows.exe -p LICENSE -p THIRD_PARTY.txt -p SHA256SUMS
-          $want = ((Get-Content kit\SHA256SUMS | Where-Object { $_ -match ' setup-windows\.exe$' }) -split ' ')[0]
-          $have = (Get-FileHash kit\setup-windows.exe -Algorithm SHA256).Hash.ToLower()
-          if ($want -ne $have) { throw "setup-windows.exe checksum differs" }
+          if (-not (Test-Path kit\setup-windows.exe)) { throw "no setup-windows.exe in release $env:KIT_TAG of $env:KIT_REPO" }
+          # a kit uploaded straight from out\release\LiveAndRecompiled has no SHA256SUMS: checked when there is one
+          if (Test-Path kit\SHA256SUMS) {
+            $want = ((Get-Content kit\SHA256SUMS | Where-Object { $_ -match ' setup-windows\.exe$' }) -split ' ')[0]
+            $have = (Get-FileHash kit\setup-windows.exe -Algorithm SHA256).Hash.ToLower()
+            if ($want -ne $have) { throw "setup-windows.exe checksum differs" }
+          }
 
       - name: Build and package
         shell: pwsh
