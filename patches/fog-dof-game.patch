@@ -1,0 +1,160 @@
+# Game side of the Fog and Depth of field toggles. Apply in live-and-recompiled (branch launcher, commit d498f0c,
+# the commit this repo pins) with: git apply ../patches/fog-dof-game.patch   then build the kit with tools/package.sh.
+diff --git a/src/conker/game/ui.cpp b/src/conker/game/ui.cpp
+index 498f7f8..44fd0ac 100644
+--- a/src/conker/game/ui.cpp
++++ b/src/conker/game/ui.cpp
+@@ -1008,6 +1008,10 @@ void Draw(double fps) {
+                 ImGui::SeparatorText("Post-processing");
+                 ImGui::Checkbox("Vignette", &vignette::g_on);
+                 Hint("The game's darkened screen edges. The red flash when you're hurt stays either way.", true);
++                ImGui::Checkbox("Fog", &s.fog);
++                Hint("The game's distance fog. Off shows the whole level clearly, to the edge of what the game draws.", true);
++                ImGui::Checkbox("Depth of field", &s.depth_of_field);
++                Hint("The game's blur on what is out of focus, near and far. Off keeps the whole picture sharp.", true);
+                 ImGui::Checkbox("SMAA", &s.smaa);
+                 Slider("Film grain %", &s.film_grain, 0, 100, app::Settings{}.film_grain);
+                 Slider("Chromatic aberration %", &s.chromatic_aberration, 0, 100, app::Settings{}.chromatic_aberration);
+diff --git a/src/runtime/app/app.h b/src/runtime/app/app.h
+index 2d11125..609425a 100644
+--- a/src/runtime/app/app.h
++++ b/src/runtime/app/app.h
+@@ -33,6 +33,10 @@ struct Settings {
+     // ambient occlusion from the depth buffer, first: its strength in % (0 off) and its reach in the title's units
+     uint32_t ambient_occlusion = 0;
+     uint32_t ambient_occlusion_radius = 30;
++    // the title's own effects, on as it draws them: off, its fog is left out of every draw (gpu::FillFogOff) and its
++    // depth of field's blur is never laid over the picture (the renderer skips the composite); read on each draw
++    bool fog = true;
++    bool depth_of_field = true;
+     uint32_t volume = 100;           // the game's sound in %, the mixer's output scaled by its square
+     std::string audio_device;         // an audio::Device id, "" the system default
+     // the output's speakers: "auto" (5.1 when the device has six channels or more, else stereo), "stereo" or "5.1"
+diff --git a/src/runtime/app/settings.cpp b/src/runtime/app/settings.cpp
+index f4b86e0..573fece 100644
+--- a/src/runtime/app/settings.cpp
++++ b/src/runtime/app/settings.cpp
+@@ -66,6 +66,8 @@ void Load() {
+     s.chromatic_aberration = t["chromatic_aberration"].value_or(s.chromatic_aberration);
+     s.ambient_occlusion = t["ambient_occlusion"].value_or(s.ambient_occlusion);
+     s.ambient_occlusion_radius = t["ambient_occlusion_radius"].value_or(s.ambient_occlusion_radius);
++    s.fog = t["fog"].value_or(s.fog);
++    s.depth_of_field = t["depth_of_field"].value_or(s.depth_of_field);
+     s.volume = std::min<uint32_t>(t["volume"].value_or(s.volume), 100);
+     s.audio_device = t["audio_device"].value_or(s.audio_device);
+     s.speakers = t["speakers"].value_or(s.speakers);
+@@ -113,6 +115,8 @@ toml::table Table() {
+                   {"chromatic_aberration", int64_t(s.chromatic_aberration)},
+                   {"ambient_occlusion", int64_t(s.ambient_occlusion)},
+                   {"ambient_occlusion_radius", int64_t(s.ambient_occlusion_radius)},
++                  {"fog", s.fog},
++                  {"depth_of_field", s.depth_of_field},
+                   {"volume", int64_t(s.volume)},
+                   {"audio_device", s.audio_device},
+                   {"speakers", s.speakers},
+diff --git a/src/runtime/gpu/draw.cpp b/src/runtime/gpu/draw.cpp
+index 4d0c07d..63c9910 100644
+--- a/src/runtime/gpu/draw.cpp
++++ b/src/runtime/gpu/draw.cpp
+@@ -406,11 +406,35 @@ void FillFogConstants(const State& s, bool vertex_program, DrawConstants& c) {
+     c.fog[3] = float(s.rs[kRsFogTableMode]);
+ }
+ 
++// A fogged draw with its fog factor held where the colour comes out as it went in. Which end that is depends on the
++// final combiner, rgb = D + A * B + (1 - A) * C: the library's (and the fixed function's, and a shader's without one)
++// is fog alpha * R0 + (1 - fog alpha) * fog colour, unfogged at 1, and Conker's own is the other way round, fog
++// alpha * fog colour + (1 - fog alpha) * R0, unfogged at 0. A final combiner that takes the fog some other way
++// (its alpha between two colours neither of which is the fog's, or the fog colour alone) keeps its fog: that is no
++// distance fog to leave out. So does a draw the title draws without fog.
++void FillFogOff(const State& s, DrawConstants& c) {
++    if (c.fog[3] == 0) return;  // no fog on this draw
++    constexpr float kHeld = 2.0f;  // PixelHlsl's fogin
++    uint32_t abcd = s.ps ? SimpleState(s, kMPsFinalAbcd) : 0;
++    if (!abcd && !(s.ps && SimpleState(s, kMPsFinalEfgh))) {
++        c.fog_color[3] = kHeld + 1.0f;
++        return;
++    }
++    // PS_COMBINERINPUTS: the register in bits 0 to 3 (3 the fog), bit 4 its alpha, bits 5 to 7 the mapping
++    constexpr uint32_t kFog = 3, kAlpha = 0x10, kInvert = 0x20;
++    uint32_t a = abcd >> 24, b = (abcd >> 16) & 0xFF, cc = (abcd >> 8) & 0xFF;
++    auto colour = [&](uint32_t in) { return (in & 0xF) == kFog && !(in & kAlpha); };
++    if ((a & 0xF) != kFog || !(a & kAlpha) || (a & 0xE0 & ~kInvert) || colour(b) == colour(cc)) return;
++    float unfogged = colour(cc) ? 1.0f : 0.0f;  // A where the colour that isn't the fog's is all there is
++    c.fog_color[3] = kHeld + ((a & kInvert) ? 1.0f - unfogged : unfogged);
++}
++
+ void FillSurfaceConstants(const State& s, GuestExtent size, DrawConstants& c) {
+     c.surf[0] = float(size.w);
+     c.surf[1] = float(size.h);
+     c.surf[2] = 1.0f / s.zscale;
+     Color(s.rs[kRsFogColor], c.fog_color);
++    c.fog_color[3] = 0;  // no shader reads a fog colour's alpha: the place is FillFogOff's
+     c.misc[0] = float(SimpleState(s, kMAlphaRef) & 0xFF);
+     c.misc[1] = SimpleState(s, kMAlphaTestEnable) ? float(CmpIndex(SimpleState(s, kMAlphaFunc))) : kAlphaTestAlways;
+     c.misc[2] = float(CmpIndex(s.rs[kRsShadowFunc]));
+diff --git a/src/runtime/gpu/draw.h b/src/runtime/gpu/draw.h
+index be39d5f..7401465 100644
+--- a/src/runtime/gpu/draw.h
++++ b/src/runtime/gpu/draw.h
+@@ -331,6 +331,8 @@ void KeyRasterizer(const State& s, const Assembled& a, PsoKey& k);
+ constexpr float kAlphaTestAlways = 7.0f;
+ 
+ void FillFogConstants(const State& s, bool vertex_program, DrawConstants& c);
++// the draw without its fog (app::Settings::fog off): after FillSurfaceConstants and FillFogConstants
++void FillFogOff(const State& s, DrawConstants& c);
+ void FillSurfaceConstants(const State& s, GuestExtent size, DrawConstants& c);
+ // stage0: the sprite's coordinates go to stage 0 (FixedSprite), else to stage 3
+ void FillPointConstants(const State& s, bool vertex_program, bool stage0, DrawConstants& c);
+diff --git a/src/runtime/gpu/shaders.cpp b/src/runtime/gpu/shaders.cpp
+index 25427f2..9ef15dc 100644
+--- a/src/runtime/gpu/shaders.cpp
++++ b/src/runtime/gpu/shaders.cpp
+@@ -1014,7 +1014,8 @@ std::string PixelHlsl(const PixelKey& k) {
+     s += "    float4 tc0 = i.tc0, tc1 = i.tc1, tc2 = i.tc2, tc3 = i.tc3;\n";
+     s += k.two_sided ? "    float4 v0 = front ? i.d0 : i.b0, v1 = front ? i.d1 : i.b1;\n" : "    float4 v0 = i.d0, v1 = i.d1;\n";
+     s += "    if (misc.w == 0) v1 = float4(0, 0, 0, 1);\n";
+-    s += "    float4 fogin = float4(fogcolor.rgb, saturate(i.fogamt));\n";
++    // fogcolor.a from 2 up is a fog factor held for the draw, less 2 (FillFogOff); a fog colour's own alpha stays 0
++    s += "    float4 fogin = float4(fogcolor.rgb, fogcolor.a >= 2 ? fogcolor.a - 2 : saturate(i.fogamt));\n";
+     if (k.shading && *Shading(k.shading).coords) s += std::string(Shading(k.shading).coords) + "\n";
+     std::string body;
+     std::string pre;
+diff --git a/src/runtime/gpu/shaders.h b/src/runtime/gpu/shaders.h
+index 551851e..a207ff8 100644
+--- a/src/runtime/gpu/shaders.h
++++ b/src/runtime/gpu/shaders.h
+@@ -212,7 +212,7 @@ inline const ShaderHooks* g_shader_hooks = nullptr;
+ struct DrawConstants {
+     float surf[4];      // target width, height, 1 / depth scale, 0
+     float fog[4];       // start, end, density, mode
+-    float fog_color[4];
++    float fog_color[4]; // r g b, then 0, or 2 + the fog factor every pixel of the draw takes (FillFogOff)
+     float misc[4];      // alpha ref, alpha func, shadow func, specular
+     float pc[18][4];    // combiner c0 c1 per stage, then final c0 c1
+     float tfactor[4];
+diff --git a/src/runtime/gpu/vulkan.cpp b/src/runtime/gpu/vulkan.cpp
+index 6e14aa5..54fae19 100644
+--- a/src/runtime/gpu/vulkan.cpp
++++ b/src/runtime/gpu/vulkan.cpp
+@@ -3536,6 +3536,7 @@ void VulkanBackend::UploadConstants(const State& s, const DrawShaders& sh, const
+         FillPointConstants(s, sh.prog, &s == &sprite_, c);
+     }
+     FillFogConstants(s, sh.prog, c);
++    if (!app::Get().fog) FillFogOff(s, c);
+     FillCombinerConstants(s, c);
+     FillTextureConstants(s, stages.rt, stages.exact, stages.k, stages.wide, c);
+     if (sh.fixed_transform) {
+@@ -4329,6 +4330,13 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
+     PixelKey pk = MakePixelKey(s, stages.info);
+     pk.quad = sh.quad;
+     pk.shading = sh.shading;
++    // app::Settings::depth_of_field off: the title's depth of field ends in one pass over the frame, the blurred
++    // copy blended in by a focus mask it works out from the depth buffer's bytes on stage 0 (the draw DepthSpread
++    // is for). Left out, the frame stays as sharp as it was drawn; the copies it shrank before are never shown.
++    // Only a blended screen pass: one that wrote the picture whole would leave nothing in its place.
++    if (!app::Get().depth_of_field && pk.programmable && !pk.shading && (pk.tex[0].flags & kTexDepthBytes) &&
++        (pk.tex_modes & 0x1F) == 1 && s.simple[kMBlendEnable >> 2] && ScreenSpaceDraw(s, a))
++        return CountedSkip(s, "depth of field off");
+     sh.pkey = Hash(&pk, sizeof(pk));
+     EnsurePixelShader(pk, sh);
+     if (!sh.vs_code || !sh.ps_code) return CountedSkip(s, "shaders");

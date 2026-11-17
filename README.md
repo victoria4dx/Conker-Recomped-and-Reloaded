@@ -54,6 +54,7 @@ on your PC, with a modern Vulkan renderer. There's no emulator.
 - MSAA up to 8×, SMAA, anisotropic filtering up to 16×, ambient occlusion, plus optional film grain and chromatic
   aberration.
 - The game's vignette (its darkened screen edges) can be turned off. The red flash when you're hurt stays.
+- The game's distance fog and its depth of field blur can each be turned off (Graphics → Post-processing).
 
 **Language and sound**
 - Play in **English, French, German, Spanish, Italian or Japanese**: menus and subtitles from the disc. The voices are

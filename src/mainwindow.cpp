@@ -392,6 +392,10 @@ QWidget* MainWindow::BuildGraphics() {
     v->addWidget(Group(tr("Post-processing"), &f));
     Check(f, tr("Vignette"), "vignette", true,
           tr("The game's darkened screen edges. The red flash when you're hurt stays either way."));
+    Check(f, tr("Fog"), "fog", true,
+          tr("The game's distance fog. Off shows the whole level clearly, to the edge of what the game draws."));
+    Check(f, tr("Depth of field"), "depth_of_field", true,
+          tr("The game's blur on what is out of focus, near and far. Off keeps the whole picture sharp."));
     Check(f, tr("SMAA anti-aliasing"), "smaa", false);
     Percent(f, tr("Film grain"), "film_grain", 0, 100, 0);
     Percent(f, tr("Chromatic aberration"), "chromatic_aberration", 0, 100, 0);
